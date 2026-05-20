@@ -1,0 +1,219 @@
+version: "3.9"
+
+# ============================================================
+# Fake News Trend Drift Detector — Docker Compose Stack
+#
+# Services:
+#   postgres   — PostgreSQL + pgvector
+#   redis      — Prediction caching
+#   mlflow     — Experiment tracking & model registry
+#   api        — FastAPI inference service
+#   prefect    — Orchestration server
+#   prometheus — Metrics scraping
+#   grafana    — Dashboards
+#   streamlit  — Optional UI dashboard
+# ============================================================
+
+networks:
+  mlops_net:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  mlflow_data:
+  redis_data:
+  grafana_data:
+  prometheus_data:
+
+services:
+
+  # ── PostgreSQL + pgvector ──────────────────────────────────────────────────
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: fakenews_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: fakenews_db
+      POSTGRES_USER: mlops_user
+      POSTGRES_PASSWORD: mlops_pass
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./docker/init_db.sql:/docker-entrypoint-initdb.d/init_db.sql
+    ports:
+      - "5432:5432"
+    networks:
+      - mlops_net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mlops_user -d fakenews_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── Redis ──────────────────────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: fakenews_redis
+    restart: unless-stopped
+    volumes:
+      - redis_data:/data
+    ports:
+      - "6379:6379"
+    networks:
+      - mlops_net
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── MLflow ─────────────────────────────────────────────────────────────────
+  mlflow:
+    image: python:3.11-slim
+    container_name: fakenews_mlflow
+    restart: unless-stopped
+    working_dir: /mlflow
+    command: >
+      bash -c "pip install mlflow psycopg2-binary --quiet &&
+               mlflow server
+               --host 0.0.0.0
+               --port 5000
+               --backend-store-uri postgresql://mlops_user:mlops_pass@postgres:5432/fakenews_db
+               --default-artifact-root /mlflow/artifacts"
+    volumes:
+      - mlflow_data:/mlflow/artifacts
+    ports:
+      - "5000:5000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - mlops_net
+    environment:
+      MLFLOW_TRACKING_URI: "http://mlflow:5000"
+
+  # ── FastAPI Inference Service ──────────────────────────────────────────────
+  api:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.api
+    container_name: fakenews_api
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: fakenews_db
+      POSTGRES_USER: mlops_user
+      POSTGRES_PASSWORD: mlops_pass
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      MLFLOW_TRACKING_URI: "http://mlflow:5000"
+      EMBEDDING_MODEL: "all-MiniLM-L6-v2"
+      CANARY_TRAFFIC_PCT: "0"
+      SHADOW_MODE: "false"
+    volumes:
+      - ./models:/app/models
+      - ./data:/app/data
+      - ./reports:/app/reports
+    networks:
+      - mlops_net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ── Prefect Orchestration ──────────────────────────────────────────────────
+  prefect:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.api    # reuse same image
+    container_name: fakenews_prefect
+    restart: unless-stopped
+    command: prefect server start --host 0.0.0.0
+    ports:
+      - "4200:4200"
+    environment:
+      PREFECT_API_URL: "http://prefect:4200/api"
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: fakenews_db
+      POSTGRES_USER: mlops_user
+      POSTGRES_PASSWORD: mlops_pass
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      MLFLOW_TRACKING_URI: "http://mlflow:5000"
+      API_BASE_URL: "http://api:8000"
+    volumes:
+      - ./models:/app/models
+      - ./data:/app/data
+      - ./reports:/app/reports
+    networks:
+      - mlops_net
+    depends_on:
+      - postgres
+      - redis
+
+  # ── Prometheus ─────────────────────────────────────────────────────────────
+  prometheus:
+    image: prom/prometheus:v2.50.0
+    container_name: fakenews_prometheus
+    restart: unless-stopped
+    volumes:
+      - ./observability/prometheus:/etc/prometheus
+      - prometheus_data:/prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--web.console.libraries=/etc/prometheus/console_libraries"
+      - "--web.console.templates=/etc/prometheus/consoles"
+      - "--storage.tsdb.retention.time=30d"
+    ports:
+      - "9090:9090"
+    networks:
+      - mlops_net
+    depends_on:
+      - api
+
+  # ── Grafana ────────────────────────────────────────────────────────────────
+  grafana:
+    image: grafana/grafana:10.3.1
+    container_name: fakenews_grafana
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./observability/grafana/dashboards:/etc/grafana/provisioning/dashboards
+      - ./docker/grafana_datasources.yml:/etc/grafana/provisioning/datasources/datasources.yml
+    ports:
+      - "3000:3000"
+    networks:
+      - mlops_net
+    depends_on:
+      - prometheus
+
+  # ── Streamlit Dashboard (optional) ─────────────────────────────────────────
+  streamlit:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.streamlit
+    container_name: fakenews_streamlit
+    restart: unless-stopped
+    ports:
+      - "8501:8501"
+    environment:
+      API_BASE_URL: "http://api:8000"
+      MLFLOW_TRACKING_URI: "http://mlflow:5000"
+    networks:
+      - mlops_net
+    depends_on:
+      - api
