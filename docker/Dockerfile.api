@@ -37,6 +37,7 @@ COPY monitoring/ ./monitoring/
 COPY training_pipeline/ ./training_pipeline/
 COPY orchestration/ ./orchestration/
 COPY configs/ ./configs/
+COPY models/ ./models/
 
 # Create directories expected at runtime
 RUN mkdir -p models data/processed reports logs
