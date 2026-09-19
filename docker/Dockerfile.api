@@ -1,0 +1,56 @@
+# docker/Dockerfile.api
+# ======================
+# Multi-stage build for the FastAPI inference service.
+# Stage 1: install deps
+# Stage 2: copy app and run
+
+FROM python:3.11-slim AS base
+
+# System deps needed for psycopg2, sentence-transformers
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc \
+    g++ \
+    libpq-dev \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# ── Install Python dependencies ──────────────────────────────────────────────
+COPY requirements.txt .
+# Install CPU-only torch to save image size
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir torch==2.1.2 --index-url https://download.pytorch.org/whl/cpu && \
+    pip install --no-cache-dir -r requirements.txt
+
+# Pre-download the embedding model so container starts fast
+RUN python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('all-MiniLM-L6-v2')"
+
+# ── Application code ──────────────────────────────────────────────────────────
+FROM base AS runtime
+
+WORKDIR /app
+
+COPY api/ ./api/
+COPY feature_pipeline/ ./feature_pipeline/
+COPY monitoring/ ./monitoring/
+COPY training_pipeline/ ./training_pipeline/
+COPY orchestration/ ./orchestration/
+COPY configs/ ./configs/
+
+# Create directories expected at runtime
+RUN mkdir -p models data/processed reports logs
+
+# Non-root user for security
+RUN useradd -m -u 1000 appuser && chown -R appuser:appuser /app
+USER appuser
+
+EXPOSE 8000
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
+    CMD curl -f http://localhost:8000/health || exit 1
+
+# Start FastAPI with uvicorn
+CMD ["uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8000", \
+     "--workers", "2", "--log-level", "info"]

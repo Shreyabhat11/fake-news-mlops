@@ -1,0 +1,270 @@
+# .github/workflows/ci.yml
+# =========================
+# CI/CD pipeline for the Fake News Trend Drift Detector
+#
+# Triggers:
+#   - Push to main or develop
+#   - Pull requests to main
+#
+# Jobs:
+#   1. lint        — ruff + black formatting check
+#   2. test        — pytest suite with coverage
+#   3. build       — Docker build validation
+#   4. integration — spin up services and run smoke tests
+
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+env:
+  PYTHON_VERSION: "3.11"
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}/fakenews-api
+
+jobs:
+  # ── Job 1: Linting ──────────────────────────────────────────────────────────
+  lint:
+    name: Lint & Format Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install linting tools
+        run: pip install ruff black mypy
+
+      - name: Run ruff (flake8-compatible linter)
+        run: ruff check . --select E,W,F --ignore E501
+        continue-on-error: false
+
+      - name: Check formatting with black
+        run: black --check --diff .
+
+  # ── Job 2: Tests ────────────────────────────────────────────────────────────
+  test:
+    name: Unit & Integration Tests
+    runs-on: ubuntu-latest
+    needs: lint
+
+    services:
+      # Lightweight Postgres for DB tests
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_DB: fakenews_test
+          POSTGRES_USER: mlops_user
+          POSTGRES_PASSWORD: mlops_pass
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      POSTGRES_HOST: localhost
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: fakenews_test
+      POSTGRES_USER: mlops_user
+      POSTGRES_PASSWORD: mlops_pass
+      REDIS_HOST: localhost
+      REDIS_PORT: 6379
+      MLFLOW_TRACKING_URI: "file:///tmp/mlruns"
+      APP_ENV: test
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ env.PYTHON_VERSION }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install torch==2.1.2 --index-url https://download.pytorch.org/whl/cpu
+          pip install -r requirements.txt
+
+      - name: Download NLTK data
+        run: python -c "import nltk; nltk.download('stopwords'); nltk.download('punkt')"
+
+      - name: Run data pipeline tests
+        run: pytest tests/test_data_pipeline.py -v --tb=short
+
+      - name: Run drift detector tests
+        run: pytest tests/test_drift_detector.py -v --tb=short
+
+      - name: Run training pipeline tests
+        run: pytest tests/test_training_pipeline.py -v --tb=short
+
+      - name: Run API tests
+        run: pytest tests/test_api.py -v --tb=short
+
+      - name: Run full test suite with coverage
+        run: |
+          pytest tests/ \
+            --cov=api \
+            --cov=data_pipeline \
+            --cov=feature_pipeline \
+            --cov=training_pipeline \
+            --cov=monitoring \
+            --cov-report=xml \
+            --cov-report=term-missing \
+            -v
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v4
+        with:
+          file: ./coverage.xml
+          fail_ci_if_error: false
+
+  # ── Job 3: Docker Build ─────────────────────────────────────────────────────
+  build:
+    name: Docker Build Validation
+    runs-on: ubuntu-latest
+    needs: test
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build API Docker image (no push)
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: docker/Dockerfile.api
+          push: false
+          tags: fakenews-api:ci-test
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build Streamlit image (no push)
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: docker/Dockerfile.streamlit
+          push: false
+          tags: fakenews-streamlit:ci-test
+
+  # ── Job 4: Docker Push (main branch only) ───────────────────────────────────
+  push:
+    name: Push Docker Image to Registry
+    runs-on: ubuntu-latest
+    needs: [test, build]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata for Docker
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=ref,event=branch
+            type=sha,prefix=sha-
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build and push API image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: docker/Dockerfile.api
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # ── Job 5: Integration Smoke Test ───────────────────────────────────────────
+  integration:
+    name: Docker Compose Smoke Test
+    runs-on: ubuntu-latest
+    needs: build
+    if: github.ref == 'refs/heads/main'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Create .env for compose
+        run: cp .env.example .env
+
+      - name: Start services
+        run: |
+          docker compose up -d postgres redis
+          sleep 15  # wait for postgres to be ready
+
+      - name: Run data pipeline
+        run: |
+          docker compose run --rm api python data_pipeline/ingest.py
+
+      - name: Run training pipeline (quick)
+        run: |
+          docker compose run --rm api python training_pipeline/train.py --classifier logistic_regression
+
+      - name: Start API service
+        run: |
+          docker compose up -d api
+          sleep 20
+
+      - name: Smoke test: health check
+        run: |
+          curl -f http://localhost:8000/health || exit 1
+
+      - name: Smoke test: predict endpoint
+        run: |
+          curl -s -X POST http://localhost:8000/predict \
+            -H "Content-Type: application/json" \
+            -d '{"text": "The government announced new economic policies affecting trade relations worldwide today."}' \
+            | python -c "import sys,json; d=json.load(sys.stdin); assert d['prediction'] in ['FAKE','REAL'], 'Bad prediction'"
+
+      - name: Collect logs on failure
+        if: failure()
+        run: docker compose logs --tail=100
+
+      - name: Tear down
+        if: always()
+        run: docker compose down -v

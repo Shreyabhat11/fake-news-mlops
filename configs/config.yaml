@@ -1,0 +1,101 @@
+# ========================================
+# Central Configuration
+# configs/config.yaml
+# ========================================
+
+app:
+  name: "Fake News Trend Drift Detector"
+  version: "1.0.0"
+  environment: "${APP_ENV:development}"
+  log_level: "${LOG_LEVEL:INFO}"
+
+database:
+  host: "${POSTGRES_HOST:localhost}"
+  port: "${POSTGRES_PORT:5432}"
+  name: "${POSTGRES_DB:fakenews_db}"
+  user: "${POSTGRES_USER:mlops_user}"
+  password: "${POSTGRES_PASSWORD:mlops_pass}"
+  pool_size: 10
+  max_overflow: 20
+
+redis:
+  host: "${REDIS_HOST:localhost}"
+  port: "${REDIS_PORT:6379}"
+  db: 0
+  ttl_seconds: 3600        # embedding cache TTL
+
+mlflow:
+  tracking_uri: "${MLFLOW_TRACKING_URI:http://localhost:5000}"
+  experiment_name: "fake_news_detection"
+  model_name: "fake_news_classifier"
+  artifact_location: "./mlruns"
+
+model:
+  embedding_model: "all-MiniLM-L6-v2"   # fast, 384-dim
+  embedding_dim: 384
+  classifier: "logistic_regression"      # options: logistic_regression, xgboost
+  max_text_length: 512
+  batch_size: 32
+
+  # Hyperparameters for Logistic Regression
+  logistic_regression:
+    C: 1.0
+    max_iter: 1000
+    solver: "lbfgs"
+    class_weight: "balanced"
+
+  # Hyperparameters for XGBoost
+  xgboost:
+    n_estimators: 200
+    max_depth: 6
+    learning_rate: 0.1
+    subsample: 0.8
+    use_label_encoder: false
+    eval_metric: "logloss"
+
+data:
+  raw_path: "data/raw"
+  processed_path: "data/processed"
+  train_size: 0.8
+  val_size: 0.1
+  test_size: 0.1
+  random_seed: 42
+  min_text_length: 20     # filter out very short texts
+
+drift:
+  # Evidently thresholds
+  data_drift_threshold: 0.15       # p-value threshold
+  confidence_drift_threshold: 0.10 # confidence score shift
+  prediction_drift_threshold: 0.10
+  embedding_drift_threshold: 0.20
+
+  # Window sizes for drift detection
+  reference_window: 1000    # samples in reference dataset
+  current_window: 200       # samples in current window
+
+  # Auto-retrain trigger
+  auto_retrain: true
+  retrain_drift_score: 0.20  # trigger if drift score > this
+
+deployment:
+  # Canary deployment
+  canary_traffic_pct: 10     # % traffic to new model
+  shadow_mode: false         # log predictions without serving
+
+  # Rate limiting
+  rate_limit_requests: 100   # per minute per IP
+  rate_limit_window: 60      # seconds
+
+monitoring:
+  prometheus_port: 9090
+  grafana_port: 3000
+  metrics_prefix: "fakenews"
+
+api:
+  host: "0.0.0.0"
+  port: 8000
+  workers: 2
+  timeout: 30
+  cors_origins:
+    - "http://localhost:3000"
+    - "http://localhost:8501"  # streamlit

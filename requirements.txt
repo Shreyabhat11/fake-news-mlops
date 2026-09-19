@@ -1,0 +1,77 @@
+# ========================================
+# Fake News Trend Drift Detector
+# requirements.txt
+# ========================================
+
+# --- Core Python ---
+python-dotenv
+pydantic
+pydantic-settings
+
+# --- FastAPI & Server ---
+fastapi
+uvicorn[standard]
+httpx
+slowapi         # rate limiting
+aiofiles
+
+# --- ML & NLP ---
+scikit-learn
+xgboost
+sentence-transformers
+transformers
+torch        # CPU-only; use torchcu for GPU
+numpy
+pandas
+scipy
+joblib
+
+# --- MLOps ---
+mlflow
+dvc
+evidently        # drift detection
+
+# --- Orchestration ---
+prefect
+
+# --- Database ---
+psycopg2-binary
+sqlalchemy
+pgvector
+alembic
+
+# --- Caching ---
+redis
+
+# --- Monitoring ---
+prometheus-client
+prometheus-fastapi-instrumentator
+
+# --- Data Processing ---
+nltk
+beautifulsoup4
+tqdm
+requests
+
+# --- Testing ---
+pytest
+pytest-asyncio
+pytest-cov
+httpx
+factory-boy
+
+# --- Linting ---
+ruff
+black
+mypy
+
+# --- Dashboard ---
+streamlit
+plotly
+altair
+
+# --- Utilities ---
+loguru
+click
+rich
+python-multipart

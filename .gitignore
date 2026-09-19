@@ -1,0 +1,59 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Virtual environments
+.venv/
+venv/
+env/
+.env
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb
+
+# ML artifacts (tracked by DVC, not git)
+data/raw/*.csv
+data/processed/
+models/*.pkl
+models/*.json
+
+# MLflow
+mlruns/
+mlartifacts/
+
+# Reports
+reports/
+coverage_html/
+.coverage
+coverage.xml
+
+# Docker
+*.log
+logs/
+
+# macOS
+.DS_Store
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# DVC
+.dvc/cache/
+.dvc/tmp/
+
+# Pytest
+.pytest_cache/
+
+# Secrets — NEVER commit these
+.env
+secrets/

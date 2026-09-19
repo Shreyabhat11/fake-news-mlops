@@ -1,0 +1,146 @@
+{
+  "__inputs": [
+    {
+      "name": "DS_PROMETHEUS",
+      "label": "Prometheus",
+      "type": "datasource",
+      "pluginId": "prometheus"
+    }
+  ],
+  "title": "Fake News MLOps Dashboard",
+  "uid": "fakenews-mlops-v1",
+  "version": 1,
+  "schemaVersion": 38,
+  "refresh": "10s",
+  "time": { "from": "now-1h", "to": "now" },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Total Predictions (last 1h)",
+      "type": "stat",
+      "datasource": { "type": "prometheus", "uid": "DS_PROMETHEUS" },
+      "gridPos": { "x": 0, "y": 0, "w": 4, "h": 4 },
+      "options": { "colorMode": "background", "graphMode": "none", "textMode": "value" },
+      "targets": [
+        {
+          "expr": "sum(increase(fakenews_predictions_total[1h]))",
+          "legendFormat": "Predictions"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "FAKE vs REAL distribution",
+      "type": "piechart",
+      "datasource": { "type": "prometheus", "uid": "DS_PROMETHEUS" },
+      "gridPos": { "x": 4, "y": 0, "w": 6, "h": 6 },
+      "targets": [
+        {
+          "expr": "sum by (label) (increase(fakenews_predictions_total[1h]))",
+          "legendFormat": "{{ label }}"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "Drift Score",
+      "type": "gauge",
+      "datasource": { "type": "prometheus", "uid": "DS_PROMETHEUS" },
+      "gridPos": { "x": 10, "y": 0, "w": 4, "h": 4 },
+      "options": {
+        "minVizValue": 0,
+        "maxVizValue": 1,
+        "thresholds": {
+          "steps": [
+            { "color": "green", "value": 0 },
+            { "color": "yellow", "value": 0.15 },
+            { "color": "red", "value": 0.30 }
+          ]
+        }
+      },
+      "targets": [{ "expr": "fakenews_drift_score", "legendFormat": "Drift Score" }]
+    },
+    {
+      "id": 4,
+      "title": "Inference Latency (P50 / P95 / P99)",
+      "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "DS_PROMETHEUS" },
+      "gridPos": { "x": 0, "y": 4, "w": 12, "h": 6 },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.50, fakenews_inference_latency_seconds_bucket)",
+          "legendFormat": "P50 latency"
+        },
+        {
+          "expr": "histogram_quantile(0.95, fakenews_inference_latency_seconds_bucket)",
+          "legendFormat": "P95 latency"
+        },
+        {
+          "expr": "histogram_quantile(0.99, fakenews_inference_latency_seconds_bucket)",
+          "legendFormat": "P99 latency"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "title": "Prediction Confidence Distribution",
+      "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "DS_PROMETHEUS" },
+      "gridPos": { "x": 12, "y": 4, "w": 12, "h": 6 },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.25, fakenews_prediction_confidence_bucket)",
+          "legendFormat": "P25 confidence"
+        },
+        {
+          "expr": "histogram_quantile(0.50, fakenews_prediction_confidence_bucket)",
+          "legendFormat": "P50 confidence"
+        },
+        {
+          "expr": "histogram_quantile(0.95, fakenews_prediction_confidence_bucket)",
+          "legendFormat": "P95 confidence"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "title": "Request Rate (req/min)",
+      "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "DS_PROMETHEUS" },
+      "gridPos": { "x": 0, "y": 10, "w": 8, "h": 5 },
+      "targets": [
+        {
+          "expr": "rate(fakenews_predictions_total[1m]) * 60",
+          "legendFormat": "Requests/min"
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "title": "Cache Hit Rate",
+      "type": "stat",
+      "datasource": { "type": "prometheus", "uid": "DS_PROMETHEUS" },
+      "gridPos": { "x": 8, "y": 10, "w": 4, "h": 5 },
+      "targets": [
+        {
+          "expr": "rate(fakenews_cache_hits_total[5m]) / rate(fakenews_predictions_total[5m])",
+          "legendFormat": "Cache hit rate"
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "title": "Retraining Events",
+      "type": "stat",
+      "datasource": { "type": "prometheus", "uid": "DS_PROMETHEUS" },
+      "gridPos": { "x": 12, "y": 10, "w": 4, "h": 5 },
+      "options": { "colorMode": "background" },
+      "targets": [
+        {
+          "expr": "fakenews_retrain_events_total",
+          "legendFormat": "Retrain events"
+        }
+      ]
+    }
+  ]
+}
