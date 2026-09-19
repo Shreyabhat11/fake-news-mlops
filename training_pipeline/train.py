@@ -183,13 +183,20 @@ def train_and_track(
     X_test, y_test = load_split("test")
 
     # ── Run ───────────────────────────────────────────────────────────────────
-    with mlflow.start_run(run_name=f"{classifier}_run") as run:
-        run_id = run.info.run_id
-        logger.info(f"MLflow run started: {run_id}")
+    if MLFLOW_ENABLED:
+        run_context = mlflow.start_run(run_name=f"{classifier}_run")
+
+    else:
+        run_context = nullcontext()
+
+    with run_context as run:
+        run_id = run.info.run_id if MLFLOW_ENABLED else "local_run"
+        logger.info(f"Starting run {run_id} with classifier={classifier}")
 
         # Log parameters
         params = {"classifier": classifier, **kwargs}
-        mlflow.log_params(params)
+        if MLFLOW_ENABLED:
+            mlflow.log_params(params)
 
         # Build & train model
         model = build_model(classifier, **kwargs)
@@ -202,34 +209,38 @@ def train_and_track(
         test_metrics, test_cm = evaluate(model, X_test, y_test, split="test")
 
         all_metrics = {**val_metrics, **test_metrics}
-        mlflow.log_metrics(all_metrics)
+        if MLFLOW_ENABLED:
+            mlflow.log_metrics(all_metrics)
 
         # Artifact: confusion matrices
         val_cm_path = save_confusion_matrix_artifact(val_cm, "val")
         test_cm_path = save_confusion_matrix_artifact(test_cm, "test")
-        mlflow.log_artifact(val_cm_path)
-        mlflow.log_artifact(test_cm_path)
+        if MLFLOW_ENABLED:
+            mlflow.log_artifact(val_cm_path)
+            mlflow.log_artifact(test_cm_path)
 
         # Artifact: model pkl
         model_path = MODEL_DIR / "model.pkl"
         with open(model_path, "wb") as f:
             pickle.dump(model, f)
-        mlflow.log_artifact(str(model_path))
+        if MLFLOW_ENABLED:
+            mlflow.log_artifact(str(model_path))
 
         # Log model to MLflow model registry
-        mlflow.sklearn.log_model(
-            sk_model=model,
-            artifact_path="model",
-            registered_model_name=REGISTERED_MODEL_NAME if register else None,
-        )
+        if MLFLOW_ENABLED:
+            mlflow.sklearn.log_model(
+                sk_model=model,
+                artifact_path="model",
+                registered_model_name=REGISTERED_MODEL_NAME if register else None,
+            )
 
-        # Tag the run with metadata
-        mlflow.set_tags({
-            "classifier": classifier,
-            "val_f1": val_metrics["val_f1"],
-            "test_f1": test_metrics["test_f1"],
-            "model_version": "v1.0",
-        })
+            # Tag the run with metadata
+            mlflow.set_tags({
+                "classifier": classifier,
+                "val_f1": val_metrics["val_f1"],
+                "test_f1": test_metrics["test_f1"],
+                "model_version": "v1.0",
+            })
 
         logger.info(f"Run {run_id} complete. Val F1={val_metrics['val_f1']}, "
                     f"Test F1={test_metrics['test_f1']}")
@@ -305,4 +316,6 @@ if __name__ == "__main__":
         n_estimators=args.n_estimators,
     )
     print(f"\n✅ Training complete! MLflow Run ID: {run_id}")
-    print(f"   View at: {MLFLOW_TRACKING_URI}/#/experiments")
+
+    if MLFLOW_ENABLED:
+        print(f"View at: {MLFLOW_TRACKING_URI}/#/experiments")
