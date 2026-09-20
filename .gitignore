@@ -22,8 +22,9 @@ env/
 # ML artifacts (tracked by DVC, not git)
 data/raw/*.csv
 data/processed/
-models/*.pkl
-models/*.json
+models/*
+!models/model.pkl
+!models/latest_model_metadata.json
 
 # MLflow
 mlruns/
