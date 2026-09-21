@@ -1,94 +1,190 @@
-# 🔍 Fake News Trend Drift Detector
+# 🔍 TruthLens — Fake News Detection MLOps
 
-> **Production-grade MLOps pipeline for fake news detection with automated drift monitoring and retraining**
+> A production-style machine learning system for fake news classification, with a FastAPI inference service and a modern React frontend.
 
-[![CI/CD](https://github.com/your-username/fake-news-mlops/actions/workflows/ci.yml/badge.svg)](https://github.com/your-username/fake-news-mlops/actions)
-[![Python 3.11](https://img.shields.io/badge/python-3.11-blue.svg)](https://www.python.org/downloads/)
+[![Python 3.11](https://img.shields.io/badge/python-3.11-blue.svg)](https://www.python.org/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.109-green.svg)](https://fastapi.tiangolo.com/)
-[![MLflow](https://img.shields.io/badge/MLflow-2.10-orange.svg)](https://mlflow.org/)
+[![React](https://img.shields.io/badge/React-TypeScript-61DAFB.svg)](https://react.dev/)
+[![Vite](https://img.shields.io/badge/Vite-5.x-646CFF.svg)](https://vitejs.dev/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
+## 🌐 Live Demo
+
+**TruthLens frontend:**  
+https://fake-news-mlops.vercel.app/
+
+**FastAPI backend:**  
+https://fake-news-mlops.onrender.com
+
+**Interactive API docs:**  
+https://fake-news-mlops.onrender.com/docs
+
+TruthLens lets users submit a news headline and article body and receive a machine-learning prediction of **REAL** or **FAKE**, together with confidence and probability information.
+
+> **Important:** TruthLens is a machine-learning classifier, not a fact-checking engine. It does not independently verify claims against external sources.
 
 ---
 
-## 🏗️ Architecture Overview
+## ✨ What This Project Does
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                        DATA LAYER                                │
-│  Fake.csv ──► DVC Versioning ──► PostgreSQL + pgvector           │
-└─────────────────────────────────────────────────────────────────┘
-                              │
-┌─────────────────────────────▼──────────────────────────────────┐
-│                      PIPELINE LAYER                              │
-│  Data Pipeline ──► Feature Pipeline ──► Training Pipeline        │
-│  (clean/split)    (embeddings/index)   (LR/XGB + MLflow)        │
-└─────────────────────────────────────────────────────────────────┘
-                              │
-┌─────────────────────────────▼──────────────────────────────────┐
-│                     INFERENCE LAYER                              │
-│  FastAPI ──► Embedding Service ──► Model Serving                 │
-│  /predict    (Sentence Transformers  (canary + shadow            │
-│  /batch      + Redis cache)           + rollback)                │
-└─────────────────────────────────────────────────────────────────┘
-                              │
-┌─────────────────────────────▼──────────────────────────────────┐
-│                  DRIFT & MONITORING LAYER                        │
-│  Evidently AI ──► Auto Retrain ──► Prometheus + Grafana          │
-│  (data/concept     (Prefect DAG     (metrics +                   │
-│   drift reports)    + hot reload)    dashboards)                 │
-└─────────────────────────────────────────────────────────────────┘
-                              │
-┌─────────────────────────────▼──────────────────────────────────┐
-│                     INFRA & CI/CD LAYER                          │
-│  Docker Compose ──► GitHub Actions ──► Streamlit Dashboard       │
-└─────────────────────────────────────────────────────────────────┘
+The project takes a news article through the following workflow:
+
+```text
+Article
+   │
+   ▼
+Text preprocessing
+   │
+   ▼
+Sentence Transformer
+all-MiniLM-L6-v2
+   │
+   ▼
+384-dimensional embedding
+   │
+   ▼
+Logistic Regression classifier
+   │
+   ▼
+REAL / FAKE prediction
+   │
+   ├── confidence
+   ├── real probability
+   └── fake probability
 ```
 
-### Training Workflow
+The trained model is served through FastAPI and consumed by the React frontend.
 
-```mermaid
-flowchart LR
-    A[Raw CSVs] --> B[data_pipeline/ingest.py]
-    B --> C[DVC versioned splits]
-    C --> D[feature_pipeline/embeddings.py]
-    D --> E[pgvector + .npy files]
-    E --> F[training_pipeline/train.py]
-    F --> G[MLflow Tracking]
-    G --> H[Model Registry]
-    H --> I[model.pkl]
+---
+
+## 🏗️ Current Production Architecture
+
+```text
+┌──────────────────────────────────────────────────────────────┐
+│                         USER                                 │
+│                                                              │
+│                  TruthLens React UI                          │
+│             TypeScript + Vite + Tailwind                    │
+│                                                              │
+│                    Vercel                                    │
+│      https://fake-news-mlops.vercel.app/                    │
+└──────────────────────────┬───────────────────────────────────┘
+                           │
+                           │ HTTPS
+                           ▼
+┌──────────────────────────────────────────────────────────────┐
+│                    FastAPI Inference API                     │
+│                                                              │
+│                 Render deployment                            │
+│        https://fake-news-mlops.onrender.com                  │
+│                                                              │
+│  /health       /predict       /batch_predict                 │
+└──────────────────────────┬───────────────────────────────────┘
+                           │
+                           ▼
+┌──────────────────────────────────────────────────────────────┐
+│                    Inference Pipeline                        │
+│                                                              │
+│  all-MiniLM-L6-v2  →  384-d embedding  →  Logistic Regression│
+│                                                              │
+│                         model.pkl                            │
+└──────────────────────────────────────────────────────────────┘
 ```
 
-### Inference Workflow
+### Deployment scope
 
-```mermaid
-flowchart LR
-    A[POST /predict] --> B{Redis Cache?}
-    B -- HIT --> C[Return cached result]
-    B -- MISS --> D[Canary Router]
-    D -- 90% --> E[Primary Model]
-    D -- 10% --> F[Challenger Model]
-    E & F --> G[Sentence Transformer]
-    G --> H[Predict + Proba]
-    H --> I[Log to prediction_log]
-    I --> J[Return PredictResponse]
+The current public deployment intentionally keeps the runtime lightweight:
+
+- **Frontend:** Vercel
+- **API:** Render
+- **Model:** tracked deployment artifact
+- **Embedding model:** `all-MiniLM-L6-v2`
+- **Redis:** optional; not enabled in the current Render deployment
+- **PostgreSQL/pgvector:** not required for the current inference deployment
+- **MLflow / Prefect / Prometheus / Grafana:** retained as project/MLOps components but not required for the public inference path
+
+This keeps the deployed application practical while preserving the broader MLOps architecture in the repository.
+
+---
+
+## 🧠 Model
+
+### Dataset
+
+The project uses the Fake and Real News Dataset containing:
+
+- **44,856 total articles**
+- **35,884 training samples**
+- **4,486 validation samples**
+- **4,486 test samples**
+- 52.26% fake
+- 47.74% real
+
+### Feature extraction
+
+Each article is converted into a semantic embedding using:
+
+**Sentence Transformers — `all-MiniLM-L6-v2`**
+
+- Embedding dimension: **384**
+
+### Classifier
+
+The deployed model is:
+
+**Logistic Regression**
+
+The model was selected and trained using the generated sentence embeddings.
+
+### Test performance
+
+| Metric | Test Result |
+|---|---:|
+| F1 Score | **0.9342** |
+| ROC-AUC | **0.9838** |
+
+Test confusion matrix:
+
+```text
+[[2001, 141],
+ [ 154, 2190]]
 ```
 
-### Monitoring Workflow
+These metrics describe the model's offline test-set performance. They are not guarantees of factual accuracy on new articles.
 
-```mermaid
-flowchart TD
-    A[Prefect Scheduler] --> B[Fetch reference embeddings]
-    B --> C[Fetch recent predictions from DB]
-    C --> D[Evidently AI Report]
-    C --> E[Embedding drift KS test]
-    C --> F[Confidence degradation]
-    D & E & F --> G{Drift score > threshold?}
-    G -- NO --> H[Update Grafana metrics]
-    G -- YES --> I[Trigger retraining]
-    I --> J[Re-run full pipeline]
-    J --> K[Register new model in MLflow]
-    K --> L[POST /model/reload — hot reload API]
-```
+---
+
+## 🖥️ TruthLens Frontend
+
+The original Streamlit interface was replaced with a dedicated web frontend.
+
+### Frontend stack
+
+- React
+- TypeScript
+- Vite
+- Tailwind CSS
+- Lucide React
+- REST API integration
+
+### Main features
+
+- Single article analysis
+- Headline + article body input
+- REAL / FAKE result visualization
+- Confidence display
+- Real/fake probability visualization
+- API/system health indicator
+- Render cold-start/loading handling
+- User-friendly API error handling
+- Example articles
+- Batch analysis
+- Model information
+- How-it-works explanation
+- Responsive desktop/mobile layout
+- Production API integration
+
+The frontend does **not** implement the ML logic itself. It sends requests to the deployed FastAPI service and renders the actual model response.
 
 ---
 
@@ -96,309 +192,370 @@ flowchart TD
 
 ### Prerequisites
 
-- Docker & Docker Compose
 - Python 3.11+
-- 8 GB RAM recommended (for embedding model)
+- Node.js 20+
+- Docker (optional)
+- Git
 
-### 1. Clone and configure
+---
+
+### 1. Clone the repository
 
 ```bash
-git clone https://github.com/your-username/fake-news-mlops.git
+git clone https://github.com/Shreyabhat11/fake-news-mlops.git
 cd fake-news-mlops
-
-# Create environment file
-cp .env.example .env
-```
-
-### 2. (Optional) Add real data
-
-Download from [Kaggle: Fake News Dataset](https://www.kaggle.com/datasets/clmentbisaillon/fake-and-real-news-dataset):
-```bash
-# Place in data/raw/
-data/raw/Fake.csv
-data/raw/True.csv
-```
-
-If you skip this step, the project uses **synthetic data** automatically — sufficient for demonstration.
-
-### 3. Start all services
-
-```bash
-docker compose up --build
-```
-
-This starts:
-| Service | URL | Description |
-|---|---|---|
-| FastAPI | http://localhost:8000 | Inference API |
-| MLflow | http://localhost:5000 | Experiment tracking |
-| Grafana | http://localhost:3000 | Dashboards (admin/admin) |
-| Prometheus | http://localhost:9090 | Metrics |
-| Streamlit | http://localhost:8501 | Interactive dashboard |
-| Prefect | http://localhost:4200 | Orchestration |
-
-### 4. Run the training pipeline
-
-```bash
-# Inside the api container or locally:
-make pipeline
-
-# Or step by step:
-make ingest     # clean data → data/processed/
-make features   # generate embeddings → pgvector + .npy
-make train      # train model → models/model.pkl + MLflow
-```
-
-### 5. Make predictions
-
-```bash
-curl -X POST http://localhost:8000/predict \
-  -H "Content-Type: application/json" \
-  -d '{
-    "title": "Government announces new policy",
-    "text": "The Federal Reserve held interest rates steady on Wednesday, signaling it remains cautious about the evolving economic outlook."
-  }'
-```
-
-**Response:**
-```json
-{
-  "request_id": "a1b2c3d4-...",
-  "prediction": "REAL",
-  "label": 0,
-  "confidence": 0.9231,
-  "fake_probability": 0.0769,
-  "real_probability": 0.9231,
-  "drift_status": "normal",
-  "model_version": "v1.0",
-  "processing_time_ms": 12.4,
-  "cached": false
-}
 ```
 
 ---
 
-## 📁 Project Structure
+### 2. Backend setup
 
+Create a Python environment:
+
+```bash
+python -m venv .venv
 ```
-fake-news-mlops/
-│
-├── api/                          # FastAPI inference service
-│   ├── main.py                   # All endpoints + rate limiting + caching
-│   └── prediction_logger.py      # Async PostgreSQL prediction logging
-│
-├── data_pipeline/                # Data ingestion
-│   └── ingest.py                 # Clean, split, save (DVC-versioned)
-│
-├── feature_pipeline/             # NLP feature generation
-│   └── embeddings.py             # Sentence Transformers + pgvector storage
-│
-├── training_pipeline/            # Model training
-│   └── train.py                  # Logistic Regression / XGBoost + MLflow
-│
-├── monitoring/                   # Drift detection
-│   └── drift_detector.py         # Evidently AI + statistical drift tests
-│
-├── orchestration/                # Workflow automation
-│   └── retrain_pipeline.py       # Prefect DAG: drift check → retrain → reload
-│
-├── observability/                # Metrics & dashboards
-│   ├── prometheus/
-│   │   ├── prometheus.yml        # Scrape config
-│   │   └── alert_rules.yml       # Alerting rules
-│   └── grafana/dashboards/
-│       └── fakenews_dashboard.json
-│
-├── streamlit_app/
-│   └── app.py                    # 4-page monitoring dashboard
-│
-├── tests/                        # pytest test suite
-│   ├── conftest.py
-│   ├── test_data_pipeline.py
-│   ├── test_api.py
-│   ├── test_drift_detector.py
-│   └── test_training_pipeline.py
-│
-├── docker/
-│   ├── Dockerfile.api
-│   ├── Dockerfile.streamlit
-│   ├── init_db.sql               # pgvector schema
-│   └── grafana_datasources.yml
-│
-├── .github/workflows/
-│   └── ci.yml                    # Lint → Test → Build → Push → Smoke test
-│
-├── configs/config.yaml           # Central configuration
-├── docker-compose.yml
-├── requirements.txt
-├── Makefile                      # Developer shortcuts
-└── README.md
+
+Activate it on Windows:
+
+```powershell
+.venv\Scripts\Activate.ps1
+```
+
+Install dependencies:
+
+```bash
+pip install -r requirements.txt
+```
+
+The API-specific deployment dependencies are maintained separately in:
+
+```text
+requirements-api.txt
+```
+
+---
+
+### 3. Run the FastAPI service locally
+
+```bash
+uvicorn api.main:app --reload
+```
+
+The API will be available at:
+
+```text
+http://localhost:8000
+```
+
+Swagger documentation:
+
+```text
+http://localhost:8000/docs
+```
+
+---
+
+## 🎨 Run the Frontend Locally
+
+The production frontend is located in:
+
+```text
+truthlens-frontend/
+```
+
+Install dependencies:
+
+```bash
+cd truthlens-frontend
+npm install
+```
+
+Create a `.env` file:
+
+```env
+VITE_API_URL=http://localhost:8000
+```
+
+Start the development server:
+
+```bash
+npm run dev
+```
+
+The frontend will normally be available at:
+
+```text
+http://localhost:5173
+```
+
+### Production build
+
+```bash
+npm run build
+```
+
+The production build is generated in:
+
+```text
+truthlens-frontend/dist/
 ```
 
 ---
 
 ## 🔌 API Reference
 
+### `GET /health`
+
+Returns API and model readiness information.
+
+Example:
+
+```json
+{
+  "status": "healthy",
+  "model_loaded": true,
+  "embedding_service_ready": true,
+  "redis_connected": false,
+  "timestamp": "2026-09-20T11:29:28.111002"
+}
+```
+
+`redis_connected: false` is expected in the current lightweight public deployment because Redis is optional.
+
+---
+
 ### `POST /predict`
 
-Classify a single article.
+Classifies one article.
 
-| Field | Type | Description |
-|---|---|---|
-| `text` | `string` | Article body (required, min 10 chars) |
-| `title` | `string` | Article title (optional) |
+Request:
+
+```json
+{
+  "title": "Government announces new economic policy",
+  "text": "The government announced a new economic policy today."
+}
+```
+
+Example response:
+
+```json
+{
+  "request_id": "d2e285f2-a4c5-4fc6-9dc4-537c2470ede6",
+  "prediction": "REAL",
+  "label": 0,
+  "confidence": 0.8778,
+  "fake_probability": 0.1222,
+  "real_probability": 0.8778,
+  "drift_status": "normal",
+  "model_version": "v1.0",
+  "processing_time_ms": 2562.13,
+  "cached": false
+}
+```
+
+The example above is from a successful request to the deployed Render API.
+
+---
 
 ### `POST /batch_predict`
 
-Classify up to 50 articles at once.
+Supports batch article classification.
 
-| Field | Type | Description |
-|---|---|---|
-| `texts` | `string[]` | Array of article bodies (1–50) |
-| `titles` | `string[]` | Optional parallel array of titles |
+The frontend exposes this as a secondary batch-analysis workflow.
 
-### `GET /health`
+---
 
-Returns service liveness + readiness state.
+### Additional API endpoints
 
-### `GET /metrics`
+The FastAPI application also contains endpoints for functionality such as:
 
-Prometheus metrics in text format.
+- Prometheus metrics
+- drift status
+- model reload
 
-### `GET /drift/status`
+Refer to the interactive Swagger documentation for the current endpoint contract:
 
-Latest drift detection report (JSON).
-
-### `POST /model/reload`
-
-Hot-reload `models/model.pkl` without service restart.
+https://fake-news-mlops.onrender.com/docs
 
 ---
 
 ## 📊 Drift Detection
 
-### What is drift?
+The project includes drift-monitoring components designed to detect changes in model inputs and prediction behavior.
 
-In production, the real world changes. A model trained on 2023 news may struggle with 2025 news patterns. **Drift** is the signal that this is happening.
+The monitoring code includes checks for:
 
-### Three drift types we detect
+- data drift
+- prediction/class-distribution changes
+- confidence degradation
 
-| Type | Method | Threshold |
-|---|---|---|
-| **Data drift** | KS test on PCA of embeddings + Wasserstein distance | drift_score > 0.15 |
-| **Concept drift** | Chi-squared test on prediction class distribution | shift > 0.10 |
-| **Confidence drift** | Mean confidence drop between reference and current | drop > 0.10 |
+The API exposes a drift status used by the inference response.
 
-### Evidently AI Reports
-
-Each monitoring run generates:
-- `reports/drift_report_<timestamp>.html` — full visual report
-- `reports/latest_drift_status.json` — machine-readable status for the API
+The current public inference deployment reports the drift status as part of each prediction response.
 
 ---
 
-## 🔄 Auto-Retraining
+## 🔄 MLOps Components
 
-When `overall_drift_score > 0.20`, the Prefect flow automatically:
+The repository was designed as more than a standalone classifier and contains components for an end-to-end MLOps workflow:
 
-1. Re-runs `data_pipeline/ingest.py`
-2. Re-runs `feature_pipeline/embeddings.py`
-3. Trains a new model via `training_pipeline/train.py`
-4. Registers it in the MLflow Model Registry
-5. Calls `POST /model/reload` to hot-swap the model with **zero downtime**
+```text
+Data ingestion
+      │
+      ▼
+Preprocessing
+      │
+      ▼
+Embedding generation
+      │
+      ▼
+Model training
+      │
+      ▼
+Model artifact
+      │
+      ▼
+FastAPI inference
+      │
+      ▼
+Frontend
+```
 
-### Schedule the flow
+Additional repository components support:
 
-```bash
-# Run once
-python orchestration/retrain_pipeline.py
+- DVC-based data versioning
+- MLflow experiment/model tracking
+- PostgreSQL + pgvector integration
+- Redis caching
+- Prefect orchestration
+- drift detection
+- Prometheus metrics
+- Grafana dashboards
+- Docker
+- GitHub Actions
 
-# Deploy with 2-hour schedule (Prefect)
-python orchestration/retrain_pipeline.py --schedule
+These components are part of the broader project architecture; the public deployment currently uses the lightweight FastAPI inference path described above.
+
+---
+
+## 📁 Project Structure
+
+```text
+fake-news-mlops/
+│
+├── api/
+│   ├── main.py
+│   └── prediction_logger.py
+│
+├── data_pipeline/
+│   └── ingest.py
+│
+├── feature_pipeline/
+│   └── embeddings.py
+│
+├── training_pipeline/
+│   └── train.py
+│
+├── monitoring/
+│   └── drift_detector.py
+│
+├── orchestration/
+│   └── retrain_pipeline.py
+│
+├── observability/
+│   ├── prometheus/
+│   └── grafana/
+│
+├── models/
+│   ├── model.pkl
+│   └── latest_model_metadata.json
+│
+├── tests/
+│
+├── docker/
+│   └── Dockerfile.api
+│
+├── truthlens-frontend/
+│   ├── src/
+│   │   ├── components/
+│   │   ├── hooks/
+│   │   ├── services/
+│   │   ├── types/
+│   │   └── lib/
+│   ├── package.json
+│   └── vite.config.ts
+│
+├── configs/
+├── requirements.txt
+├── requirements-api.txt
+├── docker-compose.yml
+├── Makefile
+└── README.md
 ```
 
 ---
 
-## 🐳 Docker Services
+## 🧪 Testing
 
-All services start with one command:
+Backend tests can be run with:
+
 ```bash
-docker compose up --build
+pytest
 ```
 
-### Environment variables
-
-See `.env.example` for all configurable options. Key ones:
-
-| Variable | Default | Description |
-|---|---|---|
-| `CANARY_TRAFFIC_PCT` | `0` | % traffic to challenger model |
-| `SHADOW_MODE` | `false` | Log challenger predictions without serving |
-| `RETRAIN_DRIFT_SCORE` | `0.20` | Drift score to trigger retraining |
-| `EMBEDDING_MODEL` | `all-MiniLM-L6-v2` | Sentence Transformer model |
-
----
-
-## 🧪 Running Tests
+For a specific API test module:
 
 ```bash
-# All tests
-make test
-
-# With coverage
-make coverage
-
-# Specific module
 pytest tests/test_api.py -v
-pytest tests/test_drift_detector.py -v
 ```
 
-Tests use mocks for the model and embedding service, so **no trained artifacts are required** in CI.
+Frontend production build:
+
+```bash
+cd truthlens-frontend
+npm run build
+```
+
+The deployed API was also manually verified using:
+
+```powershell
+Invoke-RestMethod https://fake-news-mlops.onrender.com/health
+```
+
+and:
+
+```powershell
+Invoke-RestMethod -Method Post `
+  -Uri https://fake-news-mlops.onrender.com/predict `
+  -ContentType "application/json" `
+  -Body '{"title":"Government announces new economic policy","text":"The government announced a new economic policy today."}'
+```
 
 ---
 
-## 🎛️ Advanced Features
+## 🐳 Docker
 
-| Feature | Implementation |
-|---|---|
-| **Canary deployment** | `CANARY_TRAFFIC_PCT` env var; N% traffic to challenger model |
-| **Shadow deployment** | `SHADOW_MODE=true`; challenger runs silently in parallel |
-| **Model rollback** | `training_pipeline/train.py:rollback_model(run_id)` |
-| **Rate limiting** | slowapi: 100 req/min per IP on `/predict`, 20/min on `/batch_predict` |
-| **Prediction caching** | Redis: SHA256(text) → JSON, 1-hour TTL |
-| **Feature store** | pgvector table with IVFFlat index for ANN search |
-| **Async batch inference** | `/batch_predict` uses numpy vectorised embedding |
-| **Hot model reload** | `POST /model/reload` swaps model.pkl in-process |
-| **Request logging** | Every prediction logged to `prediction_log` table |
+The API has a dedicated deployment image:
 
----
+```text
+docker/Dockerfile.api
+```
 
-## 📈 Grafana Dashboards
+The API container uses a CPU-only PyTorch setup and a single Uvicorn worker to keep the inference service lightweight enough for the current Render deployment.
 
-Import `observability/grafana/dashboards/fakenews_dashboard.json` into Grafana (auto-provisioned via Docker).
+Build locally:
 
-Panels:
-- Total predictions (1h)
-- FAKE vs REAL distribution (pie chart)
-- Drift score gauge (green/yellow/red)
-- Inference latency P50/P95/P99 time series
-- Prediction confidence distribution
-- Request rate (req/min)
-- Cache hit rate
-- Retraining events counter
+```bash
+docker build -f docker/Dockerfile.api -t fake-news-api .
+```
 
----
+Run:
 
-## 🗺️ Future Improvements
-
-- [ ] **Online learning** — partial_fit updates from prediction feedback
-- [ ] **UMAP drift visualisation** — 2D embedding space in Grafana
-- [ ] **LLM-based classifier** — fine-tuned BERT/RoBERTa via HuggingFace
-- [ ] **Multi-language support** — multilingual-MiniLM embedding model
-- [ ] **Feedback loop API** — `POST /feedback` to correct wrong predictions
-- [ ] **A/B test framework** — statistical significance testing for canary
-- [ ] **Kubernetes deployment** — Helm chart for production scaling
-- [ ] **Alertmanager integration** — Slack/PagerDuty alerts from Prometheus
+```bash
+docker run -p 8000:8000 fake-news-api
+```
 
 ---
 
@@ -406,23 +563,57 @@ Panels:
 
 | Layer | Technology |
 |---|---|
+| Frontend | React + TypeScript + Vite |
+| Styling | Tailwind CSS |
+| Frontend hosting | Vercel |
 | API | FastAPI + Uvicorn |
-| ML | Scikit-learn, XGBoost, Sentence Transformers |
-| MLOps | MLflow, DVC, Evidently AI |
+| API hosting | Render |
+| NLP embeddings | Sentence Transformers |
+| Embedding model | all-MiniLM-L6-v2 |
+| Classifier | Scikit-learn Logistic Regression |
+| Data | Fake and Real News Dataset |
+| MLOps | MLflow, DVC, drift monitoring |
+| Optional storage | PostgreSQL + pgvector |
+| Optional caching | Redis |
 | Orchestration | Prefect |
-| Database | PostgreSQL + pgvector |
-| Caching | Redis |
 | Monitoring | Prometheus + Grafana |
 | CI/CD | GitHub Actions |
-| Containers | Docker + Docker Compose |
-| Dashboard | Streamlit |
+| Containers | Docker |
+
+---
+
+## 🔮 Future Improvements
+
+- [ ] Add user feedback collection for incorrect predictions
+- [ ] Improve model evaluation on newer/out-of-distribution news
+- [ ] Add explainability for model predictions
+- [ ] Expand multilingual support
+- [ ] Add richer drift visualizations
+- [ ] Add automated model evaluation gates before deployment
+- [ ] Add production monitoring dashboards to the deployed environment
+- [ ] Explore transformer-based classifiers such as BERT/RoBERTa
 
 ---
 
 ## 📄 License
 
-MIT — see [LICENSE](LICENSE)
+MIT — see [LICENSE](LICENSE).
 
 ---
 
-*Built as a production-grade MLOps portfolio project. Suitable for AI Engineer and MLOps Engineer interview showcases.*
+## 👤 Project
+
+Built as an AI/ML and MLOps portfolio project demonstrating:
+
+- NLP feature engineering
+- semantic embeddings
+- supervised classification
+- FastAPI model serving
+- Dockerized inference
+- production API deployment
+- React frontend development
+- frontend-to-ML API integration
+- drift monitoring concepts
+- reproducible ML workflows
+
+**Live application:** https://fake-news-mlops.vercel.app/
