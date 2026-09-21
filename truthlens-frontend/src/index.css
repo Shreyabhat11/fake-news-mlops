@@ -1,0 +1,70 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  * {
+    @apply border-ink-border;
+  }
+
+  html {
+    scroll-behavior: smooth;
+  }
+
+  body {
+    background-image:
+      radial-gradient(ellipse 900px 500px at 12% -10%, rgba(124, 140, 248, 0.10), transparent 60%),
+      radial-gradient(ellipse 700px 500px at 90% 10%, rgba(61, 220, 151, 0.06), transparent 55%);
+    background-attachment: fixed;
+  }
+
+  ::selection {
+    background: rgba(124, 140, 248, 0.35);
+    color: #fff;
+  }
+
+  :focus-visible {
+    outline: 2px solid #7C8CF8;
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+
+  ::-webkit-scrollbar {
+    width: 10px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: rgba(232, 234, 237, 0.12);
+    border-radius: 999px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: rgba(232, 234, 237, 0.22);
+  }
+}
+
+@layer components {
+  .glass-panel {
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.035), rgba(255, 255, 255, 0.015));
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+  }
+
+  .prob-bar-track {
+    @apply relative h-2.5 w-full overflow-hidden rounded-full bg-white/5;
+  }
+
+  .prob-bar-fill {
+    @apply absolute inset-y-0 left-0 rounded-full transition-[width] duration-700 ease-out;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
