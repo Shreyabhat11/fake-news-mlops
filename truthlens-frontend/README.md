@@ -1,4 +1,4 @@
-# TruthLens — Frontend
+# TruthLens - Frontend
 
 A React + TypeScript + Vite + Tailwind frontend for the **Fake News Trend Drift Detector**
 FastAPI backend. This replaces the project's Streamlit UI. It does not touch the backend,

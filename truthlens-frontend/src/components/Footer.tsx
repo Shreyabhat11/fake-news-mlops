@@ -6,7 +6,7 @@ export function Footer() {
   return (
     <footer className="border-t border-ink-border">
       <div className="mx-auto flex max-w-6xl flex-col items-start justify-between gap-4 px-6 py-10 text-sm text-text-muted sm:flex-row sm:items-center">
-        <p>TruthLens — a machine learning demo. Predictions are not fact-checks.</p>
+        <p>TruthLens - a machine learning demo. Predictions are not fact-checks.</p>
         <a
           href={GITHUB_URL}
           target="_blank"
